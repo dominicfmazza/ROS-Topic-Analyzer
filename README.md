@@ -20,7 +20,7 @@ The node expects to find JSON configuration files in `cfg/` with the following s
   "topics": [
     {
       "display_name": "Name", // a plaintext name for the topic
-      "handle": "/can/chassis/brake_torque", // the actual topic address
+      "handle": "/namespace/namespace/topic", // the actual topic address
       "hz_target": "100.0" // a float for a target hz rate
     }
   ]
