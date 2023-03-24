@@ -1,0 +1,6 @@
+# ignore json files
+cfg/*.json
+
+# ignore __pycache__/ directory
+src/__pycache__/
+setup.py
