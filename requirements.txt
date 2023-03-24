@@ -1,0 +1,10 @@
+asciimatics
+netifaces
+rospy
+rostopic
+wcwidth
+mock
+pyfiglet >= 0.7.2
+future
+setuptools_scm
+backports.functools_lru_cache ; python_version < "3.0"
