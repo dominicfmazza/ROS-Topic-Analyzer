@@ -1,8 +1,9 @@
 # asciimatics imports
 from asciimatics.widgets import (
     Frame,
-    ListBox,
     Widget,
+    FileBrowser,
+    TextBox,
     Layout,
     Label,
 )
@@ -14,13 +15,20 @@ from asciimatics.scene import Scene
 
 # package imports
 import os
+import rospy
 import fnmatch
 import json
 import re
 import sys
 
+
 # exception to pass out to the main thread for setting config file
 class ConfigSet(Exception):
+    pass
+
+
+# exception to catch invalid JSONs
+class InvalidJSONConfiguration(Exception):
     pass
 
 
@@ -36,29 +44,105 @@ def list_json_files(directory):
 
 
 # Function to check if the JSON structure is valid
-def is_valid_structure(json_data):
+def is_valid_structure(config, json_data):
     if "topics" in json_data:
         for topic in json_data["topics"]:
             if not all(key in topic for key in ["display_name", "handle", "hz_target"]):
-                return False
+                raise InvalidJSONConfiguration(
+                    "Json is not properly formatted,"
+                    + "your keys are incorrect."
+                    + "\nensure it is formatted like so:"
+                    + "\n\t{"
+                    + '\n\t\t"topics" : ['
+                    + "\n\t\t\t{"
+                    + '\n\t\t\t\t"display_name" : "Generic Camera - Images",'
+                    + '\n\t\t\t\t"handle" : "/robot/sensors/camera/image",'
+                    + '\n\t\t\t\t"hz_target" : "30.0"'
+                    + "\n\t\t\t},"
+                    + "\n\t\t\t{"
+                    + '\n\t\t\t\t"display_name" : "Generic Camera - Camera Info",'
+                    + '\n\t\t\t\t"handle" : "/robot/sensors/camera/camera_info",'
+                    + '\n\t\t\t\t"hz_target" : "30.0"'
+                    + "\n\t\t\t},"
+                    + "\n\t\t\t{"
+                    + '\n\t\t\t\t"display_name" : "Generic Lidar - Pointcloud",'
+                    + '\n\t\t\t\t"handle" : "/robot/sensors/lidar/pointcloud",'
+                    + '\n\t\t\t\t"hz_target" : "10.0"'
+                    + "\n\t\t\t},"
+                    + "\n\t\t]"
+                    + "\n\t}"
+                    + f"\nIn file: {config}"
+                )
+
     else:
-        return False
+        raise InvalidJSONConfiguration(
+            'Json is not properly formatted, "topics" is not found",'
+            + "ensure it is formatted like so:"
+            + "\n\t{"
+            + '\n\t\t"topics" : ['
+            + "\n\t\t\t{"
+            + '\n\t\t\t\t"display_name" : "Generic Camera - Images",'
+            + '\n\t\t\t\t"handle" : "/robot/sensors/camera/image",'
+            + '\n\t\t\t\t"hz_target" : "30.0"'
+            + "\n\t\t\t},"
+            + "\n\t\t\t{"
+            + '\n\t\t\t\t"display_name" : "Generic Camera - Camera Info",'
+            + '\n\t\t\t\t"handle" : "/robot/sensors/camera/camera_info",'
+            + '\n\t\t\t\t"hz_target" : "30.0"'
+            + "\n\t\t\t},"
+            + "\n\t\t\t{"
+            + '\n\t\t\t\t"display_name" : "Generic Lidar - Pointcloud",'
+            + '\n\t\t\t\t"handle" : "/robot/sensors/lidar/pointcloud",'
+            + '\n\t\t\t\t"hz_target" : "10.0"'
+            + "\n\t\t\t},"
+            + "\n\t\t]"
+            + "\n\t}"
+            + f"\nIn file: {config}"
+        )
+
     return True
 
 
+def is_published_topic(config, handle):
+    for topic, _ in rospy.get_published_topics():
+        if handle == topic:
+            return True
+
+    raise InvalidJSONConfiguration(
+        "Handle formatting is not a published_topic. Formatting Example:"
+        + "\n/sensors/camera/camera_1"
+        + f"\nIn file: {config}"
+        + f'\nWith handle option "handle" : "{handle}"'
+    )
+
+
 # Function to check if the handle is in the correct rostopic format
-def is_valid_handle(handle):
+def is_valid_handle(config, handle):
     pattern = re.compile(r"^(/[a-zA-Z0-9_]+)+$")
-    return bool(pattern.match(handle))
+    if bool(pattern.match(handle)) and is_published_topic(config, handle):
+        return True
+
+    raise InvalidJSONConfiguration(
+        "Handle formatting is not valid. Formatting Example:"
+        + "\n/sensors/camera/camera_1"
+        + f"\nIn file: {config}"
+        + f'\nWith handle option "handle" : "{handle}"'
+    )
 
 
 # Function to check if hz_target can be converted to a float
-def is_valid_hz_target(hz_target):
+def is_valid_hz_target(config, hz_target):
     try:
         float(hz_target)
         return True
     except ValueError:
-        return False
+        raise InvalidJSONConfiguration(
+            "HZ formatting is not valid. Make sure it is a float "
+            + "surrounded by double quotes:"
+            + '\n"0.0", "129.63", etc.'
+            + f"\nIn file: {config}"
+            + f'\nWith handle option "hz_target" : "{hz_target}"'
+        )
 
 
 # class that provides a selectable list of config files
@@ -83,18 +167,14 @@ class ConfigView(Frame):
         # title in figlet text
         self._title_contents = FigletText("Topic Analyzer", font="speed")
 
-        # set rows of list
-        self._rows = [
-            (filename, index + 1)
-            for index, filename in enumerate(list_json_files(directory))
-        ]
-
         # create and fill list view
-        self._config_list = ListBox(
+        self._config_list = FileBrowser(
             Widget.FILL_FRAME,
-            self._rows,
-            validator=self._validate_config,
+            root=directory,
+            file_filter=".*.json$",
         )
+
+        self._error_display = TextBox(height=6, as_string=True)
 
         # create layout
         layout = Layout([1])
@@ -104,6 +184,8 @@ class ConfigView(Frame):
         layout.add_widget(Label(self._title_contents, height=6))
         layout.add_widget(Label("Config Files", align="^"))
         layout.add_widget(self._config_list)
+        layout.add_widget(Label("JSON Configuration Errors", align="^"))
+        layout.add_widget(self._error_display)
         layout.add_widget(Label("(q)uit | (s)elect config", align="^"))
         self.fix()
 
@@ -115,41 +197,51 @@ class ConfigView(Frame):
                 raise StopApplication("User quit")
             # select config
             if event.key_code in [ord("s")]:
-                raise ConfigSet(
-                    self._config_list.options[self._config_list.value - 1][0]
-                )
-
+                self._select_config()
             # Force a refresh for improved responsiveness
             self._last_frame = 0
 
         # Now pass on to lower levels for normal handling of the event.
         return super(ConfigView, self).process_event(event)
 
+    def _select_config(self):
+        config = self._config_list.value
+
+        try:
+            if self._validate_config(config):
+                raise ConfigSet(self._config_list.value)
+        except InvalidJSONConfiguration as e:
+            self._error_display.value = str(e)
+        except IsADirectoryError as e:
+            self._error_display.value = str(e)
+
     # Function to ensure that config files are properly formatted
     # this is done before every topic config is displayed
     def _validate_config(self, config):
-        config = self._rows[config - 1][0]
         with open(config, "r") as json_file:
             json_data = json.load(json_file)
 
         # Checks if JSON file is the proper structure
-        if is_valid_structure(json_data):
+        if is_valid_structure(
+            config,
+            json_data,
+        ):
             for topic in json_data["topics"]:
                 handle = topic["handle"]
                 hz_target = topic["hz_target"]
 
                 # checks if handle is a valid format for ros
                 # and if the hz value is a float as a string
-                if is_valid_handle(handle) and is_valid_hz_target(hz_target):
+                if is_valid_handle(
+                    config,
+                    handle,
+                ) and is_valid_hz_target(
+                    config,
+                    hz_target,
+                ):
                     continue
-                else:
-                    # return false if the handle/target is invalid
-                    return False
             # returns true if there are no issues with the json
             return True
-        else:
-            # returns false if there are incorrect keys in json
-            return False
 
 
 # Function to play the UI
