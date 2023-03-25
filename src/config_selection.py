@@ -109,7 +109,7 @@ def is_published_topic(config, handle):
             return True
 
     raise InvalidJSONConfiguration(
-        "Handle formatting is not a published_topic. Formatting Example:"
+        "Handle is not a published_topic. Formatting Example:"
         + "\n/sensors/camera/camera_1"
         + f"\nIn file: {config}"
         + f'\nWith handle option "handle" : "{handle}"'
@@ -206,9 +206,9 @@ class ConfigView(Frame):
 
     def _select_config(self):
         config = self._config_list.value
-
         try:
             if self._validate_config(config):
+                # raise config to main
                 raise ConfigSet(self._config_list.value)
         except InvalidJSONConfiguration as e:
             self._error_display.value = str(e)
